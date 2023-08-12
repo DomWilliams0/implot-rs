@@ -4,8 +4,8 @@
 //! as lines, bars, scatter plots and text in a plot. For the module to create plots themselves,
 //! see `plot`.
 use crate::sys;
-use std::ffi::CString;
-use std::os::raw::c_char;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_int};
 
 pub use crate::sys::ImPlotPoint;
 
@@ -15,6 +15,45 @@ pub struct PlotLine {
     /// Label to show in the legend for this line
     label: CString,
 }
+
+pub trait DataType: Sized {
+    const PLOT_LINE_FN: unsafe extern "C" fn(
+        label_id: *const ::std::os::raw::c_char,
+        xs: *const Self,
+        ys: *const Self,
+        count: ::std::os::raw::c_int,
+        offset: ::std::os::raw::c_int,
+        stride: ::std::os::raw::c_int,
+    );
+}
+
+macro_rules! generate_data_type_impl {
+    ($type:ty, $c_type:ident) => {
+        paste::paste! {
+            impl DataType for $type {
+                const PLOT_LINE_FN: unsafe extern "C" fn(
+                    *const c_char,
+                    *const Self,
+                    *const Self,
+                    c_int,
+                    c_int,
+                    c_int,
+                ) = sys::[<ImPlot_PlotLine $c_type Ptr $c_type Ptr>];
+            }
+        }
+    };
+}
+
+generate_data_type_impl!(f64, double);
+generate_data_type_impl!(f32, Float);
+generate_data_type_impl!(i8, S8);
+generate_data_type_impl!(u8, U8);
+generate_data_type_impl!(i16, S16);
+generate_data_type_impl!(u16, U16);
+generate_data_type_impl!(u32, U32);
+generate_data_type_impl!(i32, S32);
+generate_data_type_impl!(i64, S64);
+generate_data_type_impl!(u64, U64);
 
 impl PlotLine {
     /// Create a new line to be plotted. Does not draw anything yet.
@@ -29,20 +68,20 @@ impl PlotLine {
     }
 
     /// Plot a line. Use this in closures passed to [`Plot::build()`](struct.Plot.html#method.build)
-    pub fn plot(&self, x: &[f64], y: &[f64]) {
+    pub fn plot<T: DataType>(&self, x: &[T], y: &[T]) {
         // If there is no data to plot, we stop here
         if x.len().min(y.len()) == 0 {
             return;
         }
         unsafe {
-            sys::ImPlot_PlotLinedoublePtrdoublePtr(
+            T::PLOT_LINE_FN(
                 self.label.as_ptr() as *const c_char,
                 x.as_ptr(),
                 y.as_ptr(),
                 x.len().min(y.len()) as i32, // "as" casts saturate as of Rust 1.45. This is safe here.
                 0,                           // No offset
-                std::mem::size_of::<f64>() as i32, // Stride, set to one f64 for the standard use case
-            );
+                std::mem::size_of::<T>() as i32, // Stride
+            )
         }
     }
 }
